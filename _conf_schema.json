@@ -1,0 +1,176 @@
+{
+  "basic_settings": {
+    "description": "基础设置",
+    "type": "object",
+    "hint": "控制哪些回复交给灵动分段处理。",
+    "items": {
+      "split_scope": {
+        "description": "处理范围",
+        "type": "string",
+        "options": ["LLM_ONLY", "ALL"],
+        "default": "LLM_ONLY",
+        "hint": "LLM_ONLY 只处理模型生成的内容；ALL 也处理其他插件产生的普通回复。流式回复不会处理。"
+      },
+      "max_length_to_disable": {
+        "description": "分段字符上限",
+        "type": "int",
+        "default": 0,
+        "hint": "回复超过这个字符数时不再分段。0 表示不限制。"
+      },
+      "blacklist": {
+        "description": "会话黑名单",
+        "type": "list",
+        "default": [],
+        "hint": "每行一个：G:群号 或 F:QQ号。例如 G:10001。命中后该群聊或私聊不使用灵动分段。"
+      }
+    }
+  },
+  "split_settings": {
+    "description": "分段规则",
+    "type": "object",
+    "hint": "控制哪些位置可以换成新的消息气泡。",
+    "items": {
+      "extra_split_points": {
+        "description": "额外分段标记",
+        "type": "list",
+        "default": [],
+        "hint": "每行填写一个标记。回复中出现该标记时会从这里分段，标记本身不会发送。"
+      },
+      "interpret_literal_newlines": {
+        "description": "识别转义换行",
+        "type": "bool",
+        "default": false,
+        "hint": "这里的 \\n 指两个字符：\\ 和 n，并不是真正的换行。开启后会把这类文字转换成换行，也会识别 \\r。"
+      },
+      "strip_segment_whitespace": {
+        "description": "清理首尾空格",
+        "type": "bool",
+        "default": true,
+        "hint": "移除每段开头和末尾的空格。清理后没有内容的分段不会发送。"
+      },
+      "strip_segment_tail_chars": {
+        "description": "移除段尾字符",
+        "type": "string",
+        "default": "",
+        "hint": "填写后会移除每段末尾连续出现的这些字符。例如填写 。！？ 会去掉段尾标点。留空不处理。"
+      },
+      "emoticon_protection": {
+        "description": "颜文字保护",
+        "type": "bool",
+        "default": true,
+        "hint": "启用后要求对话 LLM 使用 <bubble-reply-emoticon>...</bubble-reply-emoticon> 包裹颜文字，插件提取时会自动处理这些标签。"
+      }
+    }
+  },
+  "llm_split_settings": {
+    "description": "智能分段",
+    "type": "object",
+    "hint": "可使用一个模型判断更自然的分段位置。失败时会自动使用普通分段。",
+    "items": {
+      "enable_llm_split": {
+        "description": "启用智能分段",
+        "type": "bool",
+        "default": false,
+        "hint": "分段会更自然，但每条回复会增加额外的模型调用、等待时间和费用。"
+      },
+      "remove_before_split_regex": {
+        "description": "分段前清理",
+        "type": "list",
+        "default": [],
+        "hint": "每行一条正则表达式，用于在分段前清理不需要的内容。"
+      },
+      "llm_split_provider": {
+        "description": "分段模型",
+        "type": "string",
+        "default": "",
+        "_special": "select_provider",
+        "hint": "留空时使用当前会话模型。建议选择低温度、指令遵循较好的模型。"
+      },
+      "llm_split_prompt": {
+        "description": "分段提示词",
+        "type": "text",
+        "default": "请将下面的文本整理成自然的即时聊天分段。每段表达一个完整意群，通常保留 1–2 句；短回复保持单段，长回复优先在话题切换、语义转折、动作与台词边界处分段。避免把称谓、否定结构、数字、URL、代码、JSON 或紧密关联的上下文拆开。每段建议约 20–80 个中文字符，但自然性与语义完整性优先，不要为了长度机械切割。\n\n待分段文本：\n{text}",
+        "hint": "使用 {text} 表示需要分段的原文。插件会在调用模型前自动替换这个占位符。"
+      },
+      "sanitize_llm_output_regex": {
+        "description": "分段后清理",
+        "type": "list",
+        "default": [],
+        "hint": "每行一条正则表达式，用于移除分段模型可能附加的固定文字。一般留空。"
+      }
+    }
+  },
+  "quote_media_settings": {
+    "description": "引用与组件",
+    "type": "object",
+    "hint": "控制是否引用原消息，以及图片、表情和 At 跟随哪一段发送。",
+    "items": {
+      "quote_mode": {
+        "description": "引用方式",
+        "type": "string",
+        "options": ["不引用", "始终引用原消息", "智能引用"],
+        "default": "不引用",
+        "hint": "智能引用：当有消息插队时自动引用原消息。钉钉平台不支持。"
+      },
+      "image_strategy": {
+        "description": "图片发送方式",
+        "type": "string",
+        "options": ["单独发送", "跟随上一段", "跟随下一段", "保持原位置"],
+        "default": "保持原位置",
+        "hint": "决定图片单独发送，还是与前后文字放在同一条消息中。"
+      },
+      "face_strategy": {
+        "description": "表情发送方式",
+        "type": "string",
+        "options": ["单独发送", "跟随上一段", "跟随下一段", "保持原位置"],
+        "default": "保持原位置",
+        "hint": "决定平台表情单独发送，还是跟随前后文字。"
+      },
+      "at_strategy": {
+        "description": "At 发送方式",
+        "type": "string",
+        "options": ["单独发送", "跟随上一段", "跟随下一段", "保持原位置"],
+        "default": "保持原位置",
+        "hint": "决定 At 单独发送，还是跟随前后文字。"
+      }
+    }
+  },
+  "delay_settings": {
+    "description": "发送间隔",
+    "type": "object",
+    "hint": "让多条气泡之间保留一点停顿。",
+    "items": {
+      "delay_seconds": {
+        "description": "气泡间隔（秒）",
+        "type": "float",
+        "default": 0.8,
+        "hint": "每条气泡之间等待的时间。建议设置为 0.6–1.2 秒，0 表示不等待。"
+      }
+    }
+  },
+  "log_config": {
+    "description": "日志配置",
+    "type": "object",
+    "hint": "控制日志前缀和调试信息。",
+    "items": {
+      "log_with_bot_id": {
+        "description": "日志区分机器人实例",
+        "type": "bool",
+        "default": false,
+        "hint": "开启后日志前缀会附加当前机器人 ID，便于多 Bot 环境定位。"
+      },
+      "log_original_text": {
+        "description": "记录完整正文",
+        "type": "bool",
+        "default": false,
+        "hint": "开启后日志可能包含完整对话内容。排查结束后建议关闭。"
+      },
+      "debug_to_info": {
+        "description": "调试日志提级",
+        "type": "bool",
+        "default": false,
+        "hint": "开启后 debug 日志以 info 级别输出，插件热重载即可生效。"
+      }
+    }
+  }
+}
