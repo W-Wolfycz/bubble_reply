@@ -90,7 +90,17 @@ async def _run() -> None:
         )
         assert config["basic_settings"]["split_scope"] == "LLM_ONLY"
         assert config["split_settings"]["strip_segment_whitespace"] is True
-        assert set(config["delay_settings"]) == {"delay_seconds"}
+        assert set(config["delay_settings"]) == {
+            "delay_mode",
+            "delay_seconds",
+            "seconds_per_character",
+            "minimum_delay_seconds",
+            "maximum_delay_seconds",
+            "random_jitter_seconds",
+        }
+        assert config["delay_settings"]["delay_mode"] == "固定间隔"
+        assert config["delay_settings"]["random_jitter_seconds"] == 0
+        assert config["llm_split_settings"]["allow_llm_text_changes"] is False
         assert "20–80" in config["llm_split_settings"]["llm_split_prompt"]
 
     result = MessageEventResult([Comp.Plain("a")])

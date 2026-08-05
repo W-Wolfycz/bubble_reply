@@ -73,6 +73,13 @@
         "default": false,
         "hint": "分段会更自然，但每条回复会增加额外的模型调用、等待时间和费用。"
       },
+      "allow_llm_text_changes": {
+        "description": "允许分段模型修改正文",
+        "type": "bool",
+        "default": false,
+        "obvious_hint": true,
+        "hint": "开启后允许分段模型调整文字、空格和标点；发送内容可能与 AstrBot 保存的原始回复不同。"
+      },
       "remove_before_split_regex": {
         "description": "分段前清理",
         "type": "list",
@@ -138,13 +145,44 @@
   "delay_settings": {
     "description": "发送间隔",
     "type": "object",
-    "hint": "让多条气泡之间保留一点停顿。",
+    "hint": "控制多条气泡之间的停顿。可使用固定间隔，或按刚发送气泡的纯文本字数计算。",
     "items": {
+      "delay_mode": {
+        "description": "间隔方式",
+        "type": "string",
+        "options": ["固定间隔", "按字数"],
+        "default": "固定间隔",
+        "hint": "固定间隔始终使用同一个基础秒数；按字数使用“纯文本字数 × 每字符时长”，再限制在最短和最长间隔之间。"
+      },
       "delay_seconds": {
-        "description": "气泡间隔（秒）",
+        "description": "固定间隔（秒）",
         "type": "float",
         "default": 0.8,
-        "hint": "每条气泡之间等待的时间。建议设置为 0.6–1.2 秒，0 表示不等待。"
+        "hint": "选择固定间隔时使用。建议设置为 0.6–1.2 秒，0 表示不等待。"
+      },
+      "seconds_per_character": {
+        "description": "每字符时长（秒）",
+        "type": "float",
+        "default": 0.025,
+        "hint": "选择按字数时使用。例如 40 个纯文本字符 × 0.025 秒 = 1 秒。图片、At 和 Reply 不计入字数。"
+      },
+      "minimum_delay_seconds": {
+        "description": "最短间隔（秒）",
+        "type": "float",
+        "default": 0.5,
+        "hint": "按字数计算时的下限。短文本或无纯文本气泡至少等待这么久。"
+      },
+      "maximum_delay_seconds": {
+        "description": "最长间隔（秒）",
+        "type": "float",
+        "default": 2.5,
+        "hint": "按字数计算时的上限，避免长文本产生过久等待。不能小于最短间隔。"
+      },
+      "random_jitter_seconds": {
+        "description": "随机浮动（秒）",
+        "type": "float",
+        "default": 0,
+        "hint": "同时作用于固定间隔和按字数。例如基础间隔 0.8、随机浮动 0.2，实际会在 0.6–1.0 秒之间变化。0 表示关闭。"
       }
     }
   },

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import random
 from collections.abc import Awaitable, Callable
 from enum import Enum
 from typing import Protocol
 
-from ..config import DelayConfig
+from ..config import DelayConfig, DelayMode
 from ..domain.models import DeliveryPlan, PlannedSegment
 
 
@@ -24,12 +25,30 @@ class DeliveryGateway(Protocol):
 
 
 class ConfiguredDelayPolicy:
-    def __init__(self, config: DelayConfig) -> None:
+    def __init__(
+        self,
+        config: DelayConfig,
+        *,
+        random_uniform: Callable[[float, float], float] = random.uniform,
+    ) -> None:
         self._config = config
+        self._random_uniform = random_uniform
+
+    def _with_jitter(self, seconds: float) -> float:
+        jitter = self._config.jitter_seconds
+        if jitter <= 0:
+            return seconds
+        return seconds + self._random_uniform(-jitter, jitter)
 
     def seconds_for(self, plain_text_length: int) -> float:
-        del plain_text_length
-        return self._config.seconds
+        if self._config.mode == DelayMode.PER_CHARACTER:
+            base = max(0, plain_text_length) * self._config.seconds_per_character
+            jittered = self._with_jitter(base)
+            return min(
+                self._config.maximum_seconds,
+                max(self._config.minimum_seconds, jittered),
+            )
+        return max(0.0, self._with_jitter(self._config.seconds))
 
 
 def _temporary_reply_fallback(

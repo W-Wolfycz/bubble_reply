@@ -37,6 +37,11 @@ class QuoteMode(str, Enum):
     SMART = "智能引用"
 
 
+class DelayMode(str, Enum):
+    FIXED = "固定间隔"
+    PER_CHARACTER = "按字数"
+
+
 @dataclass(frozen=True)
 class TextRuleConfig:
     extra_split_points: tuple[str, ...]
@@ -53,6 +58,7 @@ class LlmSegmenterConfig:
     runtime_rule: str
     remove_before_split_regex: tuple[str, ...]
     sanitize_llm_output_regex: tuple[str, ...]
+    allow_text_changes: bool = False
 
 
 @dataclass(frozen=True)
@@ -79,6 +85,11 @@ class QuotePolicyConfig:
 @dataclass(frozen=True)
 class DelayConfig:
     seconds: float
+    mode: DelayMode = DelayMode.FIXED
+    seconds_per_character: float = 0.025
+    minimum_seconds: float = 0.5
+    maximum_seconds: float = 2.5
+    jitter_seconds: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -248,6 +259,24 @@ def load_runtime_config(
         "quote_media_settings.quote_mode",
         warn,
     )
+    delay_mode = _enum(
+        DelayMode,
+        delay.get("delay_mode", DelayMode.FIXED.value),
+        DelayMode.FIXED,
+        "delay_settings.delay_mode",
+        warn,
+    )
+    minimum_delay_seconds = _float(
+        delay.get("minimum_delay_seconds", 0.5),
+        0.5,
+    )
+    maximum_delay_seconds = _float(
+        delay.get("maximum_delay_seconds", 2.5),
+        2.5,
+    )
+    if maximum_delay_seconds < minimum_delay_seconds:
+        warn("delay_settings.maximum_delay_seconds")
+        maximum_delay_seconds = minimum_delay_seconds
     tail_chars = split.get("strip_segment_tail_chars", "")
     if isinstance(tail_chars, (list, tuple, set, frozenset)):
         tail_chars = "".join(str(item) for item in tail_chars)
@@ -303,6 +332,10 @@ def load_runtime_config(
                 "llm_split_settings.sanitize_llm_output_regex",
                 warn,
             ),
+            allow_text_changes=_bool(
+                llm.get("allow_llm_text_changes", False),
+                False,
+            ),
         ),
         media=MediaPolicyConfig(
             image=image_policy,  # type: ignore[arg-type]
@@ -314,6 +347,17 @@ def load_runtime_config(
         ),
         delay=DelayConfig(
             seconds=_float(delay.get("delay_seconds", 0.8), 0.8),
+            mode=delay_mode,  # type: ignore[arg-type]
+            seconds_per_character=_float(
+                delay.get("seconds_per_character", 0.025),
+                0.025,
+            ),
+            minimum_seconds=minimum_delay_seconds,
+            maximum_seconds=maximum_delay_seconds,
+            jitter_seconds=_float(
+                delay.get("random_jitter_seconds", 0.0),
+                0.0,
+            ),
         ),
         logging=LoggingConfig(
             log_original_text=_bool(

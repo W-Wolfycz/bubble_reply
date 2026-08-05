@@ -4,7 +4,7 @@ import asyncio
 import logging
 import unittest
 
-from bubble_reply.config import DelayConfig
+from bubble_reply.config import DelayConfig, DelayMode
 from bubble_reply.domain.models import ComponentToken, DeliveryPlan, PlannedSegment
 from bubble_reply.services.delivery_orchestrator import (
     ConfiguredDelayPolicy,
@@ -129,6 +129,35 @@ class DeliveryOrchestratorTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(gateway.replacements[-1], [("Plain",)])
         self.assertEqual(gateway.partial_reason, "delay_cancelled")
+
+    async def test_per_character_delay_uses_sent_segment_length(self) -> None:
+        sleeps: list[float] = []
+
+        async def record_sleep(seconds: float) -> None:
+            sleeps.append(seconds)
+
+        plan = DeliveryPlan(
+            [segment("a" * 40)],
+            [segment("b")],
+            "segmented",
+            "test",
+        )
+        gateway = FakeGateway()
+        orchestrator = DeliveryOrchestrator(
+            ConfiguredDelayPolicy(
+                DelayConfig(
+                    seconds=0.8,
+                    mode=DelayMode.PER_CHARACTER,
+                    seconds_per_character=0.025,
+                    minimum_seconds=0.5,
+                    maximum_seconds=2.5,
+                )
+            ),
+            logging.getLogger("bubble-reply-test"),
+            sleep_func=record_sleep,
+        )
+        await orchestrator.execute(plan, gateway, trace_id="demo")
+        self.assertEqual(sleeps, [1.0])
 
     async def test_respond_only_performs_no_active_send(self) -> None:
         plan = DeliveryPlan([], [segment("a")], "respond_only", "test")

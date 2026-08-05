@@ -7,9 +7,10 @@
 - 按真实换行和自定义标记分段。
 - 可清理每段首尾空格，清理后为空的分段不会发送。
 - 可调用独立模型寻找更自然的分段位置。
-- 智能分段只能调整换行，不能改写正文。
+- 智能分段默认只接受换行调整，也可选择容许模型轻微修改正文。
 - 支持图片、平台表情和 At 的发送位置设置。
 - 支持始终引用原消息，或只在有消息插队时智能引用。
+- 支持固定间隔、按字数计算间隔，以及两种方式共用的随机浮动。
 - 文件、语音、视频等特殊内容自动交给 AstrBot 发送。
 - 发送异常时优先避免重复消息。
 - 流式回复不会分段，并会自动跳过颜文字协议，避免内部标签进入流内容。
@@ -35,9 +36,19 @@ F:10002
 
 ## 智能分段
 
-智能分段适合低温度、指令遵循较好的模型。插件会严格检查模型输出：如果模型修改文字、标点或空格，本次建议会被拒绝，并自动回退普通分段。
+智能分段适合低温度、指令遵循较好的模型。默认情况下，插件会严格检查模型输出：如果模型修改文字、标点或空格，本次建议会被拒绝，并自动回退普通分段。
+
+开启“允许分段模型修改正文”后，插件仍要求模型只负责分段，但不再逐字符比对正文。模型产生的文字、空格或标点改动会直接用于发送；空输出、异常包装、内部标签错误和明显长度突变仍会回退。AstrBot 在结果装饰前已经保存原始回复，因此开启后，用户看到的文本可能与原生会话历史中的 assistant 内容不同。
 
 配置中的删除和清理规则使用正则表达式，实际由 Python `re` 执行，并遵循 Python 正则语法。
+
+## 发送间隔
+
+- 固定间隔：每个气泡后使用相同的基础等待时间。
+- 按字数：使用“刚发送气泡的纯文本字数 × 每字符时长”，再限制在最短和最长间隔之间。图片、At 和 Reply 不计入字数，无纯文本气泡使用最短间隔。
+- 随机浮动：同时适用于固定间隔和按字数。例如基础间隔为 `0.8` 秒、随机浮动为 `0.2` 秒，实际间隔会在 `0.6–1.0` 秒之间变化。设置为 `0` 表示关闭。
+
+默认仍使用固定 `0.8` 秒；已有配置无需调整。
 
 ## 安装
 
@@ -45,9 +56,16 @@ F:10002
 
 建议关闭 AstrBot 核心自带的分段回复，避免重复分段。
 
-## 本地验证
+## 测试职责
+
+- `tests/unit/`：测试配置解析、文本规则、候选校验、分段策略等纯 Python 逻辑。
+- `tests/contract/test_delivery_orchestrator.py`：使用 fake gateway 测试发送编排和失败回退，不依赖 AstrBot 运行时。
+- `tests/contract/target_runtime_probe.py`：只在 Windows AstrBot 测试端运行，验证真实 schema、插件加载、消息组件和 Hook 注册；文件名不会被本地 `unittest discover` 自动执行。
+- Dashboard、真实 Provider、平台发信和用户体验由部署端验收，不在开发端测试夹具中模拟。
+
+开发端只做低成本语法和 JSON 检查：
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s bubble_reply/tests -v
+PYTHONDONTWRITEBYTECODE=1 python3 -c "import ast,json,pathlib; root=pathlib.Path('bubble_reply'); json.load((root/'_conf_schema.json').open(encoding='utf-8')); [ast.parse(path.read_text(encoding='utf-8')) for path in root.rglob('*.py')]"
 python3 -m json.tool bubble_reply/_conf_schema.json >/dev/null
 ```
