@@ -28,7 +28,8 @@ EMOTICON_PROTOCOL_MARKER = "[bubble-reply-emoticon-protocol-v1]"
 EMOTICON_PROTOCOL = f"""{EMOTICON_PROTOCOL_MARKER}
 当回复中出现颜文字时，请逐字使用
 <bubble-reply-emoticon>颜文字原文</bubble-reply-emoticon>
-包裹该颜文字。标签及内部内容都必须原样保留；普通 Markdown 三反引号代码围栏不使用此标签替代。"""
+包裹该颜文字。标签及内部内容都必须原样保留；如需换行，只能在标签整体之前或之后，
+不得在标签内部插入换行；普通 Markdown 三反引号代码围栏不使用此标签替代。"""
 
 _SMART_QUOTE_OBSERVER_ENABLED = False
 _SMART_QUOTE_GROUP_BLACKLIST: frozenset[str] = frozenset()
@@ -40,13 +41,11 @@ class _SmartQuoteObserverFilter(filter.CustomFilter):
         del cfg
         if not _SMART_QUOTE_OBSERVER_ENABLED:
             return False
-        sender_id = str(event.get_sender_id() or "")
-        self_id = str(event.get_self_id() or "")
-        if sender_id and self_id and sender_id == self_id:
-            return False
+        # 平台若把 bot 自身消息回送为入站事件，也将其计入打断检测。
         group_id = str(event.get_group_id() or "")
         if group_id:
             return group_id not in _SMART_QUOTE_GROUP_BLACKLIST
+        sender_id = str(event.get_sender_id() or "")
         return sender_id not in _SMART_QUOTE_FRIEND_BLACKLIST
 
 
@@ -238,10 +237,10 @@ class BubbleReplyPlugin(Star):
                 prepared = prepare_text_for_planning(
                     chosen,
                     extra_split_points=self._runtime.text_rules.extra_split_points,
+                    # 统一按配置还原占位符:主 LLM 原文的字面量命运不因分段成败改变;
+                    # 分段 LLM 新增的字面量在 prepare 内无条件折叠为换行。
                     interpret_literals=(
                         self._runtime.text_rules.interpret_literal_newlines
-                        if not candidate.accepted
-                        else False
                     ),
                     emoticon_protection=self._runtime.text_rules.emoticon_protection,
                 )

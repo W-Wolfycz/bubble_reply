@@ -1,15 +1,29 @@
 from __future__ import annotations
 
 from .models import ValidationResult
-from .text_rules import EMOTICON_CLOSE, EMOTICON_OPEN, normalize_real_newlines
+from .text_rules import (
+    EMOTICON_CLOSE,
+    EMOTICON_OPEN,
+    NEWLINE_PLACEHOLDERS,
+    normalize_real_newlines,
+)
 
 
-_LITERAL_LAYOUT_TOKENS = ("\\r\\n", "\\n", "\\r")
-_RELAXED_MIN_LENGTH_TOLERANCE = 20
+_LITERAL_LAYOUT_TOKENS = ("\\r\\n", "\\n\\r", "\\n", "\\r")
+_RELAXED_LENGTH_TOLERANCE_PERCENT = 10
 
 
 def _without_real_newlines(text: str) -> str:
     return text.replace("\r\n", "").replace("\r", "").replace("\n", "")
+
+
+def _without_layout_tokens(text: str) -> str:
+    result = _without_real_newlines(text)
+    for token in _LITERAL_LAYOUT_TOKENS:
+        result = result.replace(token, "")
+    for placeholder in NEWLINE_PLACEHOLDERS:
+        result = result.replace(placeholder, "")
+    return result.replace(EMOTICON_OPEN, "").replace(EMOTICON_CLOSE, "")
 
 
 def _emoticon_tags_balanced(text: str) -> bool:
@@ -42,6 +56,39 @@ def _emoticon_tags_balanced(text: str) -> bool:
     )
 
 
+def _emoticon_tag_split_by_newline(text: str) -> bool:
+    """保护协议标签:开闭标签之间不得出现真实换行(换行只能加在整体前后)。"""
+    cursor = 0
+    while True:
+        open_at = text.find(EMOTICON_OPEN, cursor)
+        if open_at < 0:
+            return False
+        close_at = text.find(EMOTICON_CLOSE, open_at + len(EMOTICON_OPEN))
+        if close_at < 0:
+            return False
+        inner = text[open_at + len(EMOTICON_OPEN) : close_at]
+        if "\n" in inner or "\r" in inner:
+            return True
+        cursor = close_at + len(EMOTICON_CLOSE)
+
+
+def _marker_counts(text: str) -> tuple[int, ...]:
+    """分别统计四种换行占位符及颜文字开、闭标签。"""
+    return (
+        *(text.count(placeholder) for placeholder in NEWLINE_PLACEHOLDERS),
+        text.count(EMOTICON_OPEN),
+        text.count(EMOTICON_CLOSE),
+    )
+
+
+def _protected_markers_preserved(baseline: str, candidate: str) -> bool:
+    """受保护标记必须逐字保留:开/闭标签与占位符分别计数,任一侧增减都拦截。
+
+    注意:整体删除一组标签 = 开、闭各自减一,两个计数都变化,同样会被拦截。
+    """
+    return _marker_counts(baseline) == _marker_counts(candidate)
+
+
 def _has_unexpected_wrapper(baseline: str, candidate: str) -> bool:
     base = baseline.strip()
     value = candidate.strip()
@@ -69,19 +116,6 @@ def _literal_token_at(text: str, position: int) -> str | None:
         if text.startswith(token, position):
             return token
     return None
-
-
-def _literal_layout_counts(text: str) -> dict[str, int]:
-    counts = {token: 0 for token in _LITERAL_LAYOUT_TOKENS}
-    cursor = 0
-    while cursor < len(text):
-        token = _literal_token_at(text, cursor)
-        if token is None:
-            cursor += 1
-            continue
-        counts[token] += 1
-        cursor += len(token)
-    return counts
 
 
 def _mismatch_reason(baseline: str, candidate: str, i: int, j: int) -> str:
@@ -126,6 +160,30 @@ def _basic_candidate_rejection(
             baseline_count,
             candidate_count,
         )
+    if _emoticon_tag_split_by_newline(candidate):
+        return ValidationResult(
+            False,
+            "emoticon_tag_split",
+            None,
+            baseline_count,
+            candidate_count,
+        )
+    if not _protected_markers_preserved(baseline, candidate):
+        marker_reason = (
+            "placeholder_modified"
+            if any(
+                candidate.count(placeholder) != baseline.count(placeholder)
+                for placeholder in NEWLINE_PLACEHOLDERS
+            )
+            else "emoticon_tag_count"
+        )
+        return ValidationResult(
+            False,
+            marker_reason,
+            None,
+            baseline_count,
+            candidate_count,
+        )
     if _has_unexpected_wrapper(baseline, candidate):
         return ValidationResult(
             False,
@@ -145,25 +203,13 @@ def validate_relaxed_candidate(
     if rejection is not None:
         return rejection
 
-    baseline_count = len(_without_real_newlines(baseline))
-    candidate_count = len(_without_real_newlines(candidate))
-    baseline_literal_counts = _literal_layout_counts(baseline)
-    candidate_literal_counts = _literal_layout_counts(candidate)
-    if any(
-        candidate_literal_counts[token] > baseline_literal_counts[token]
-        for token in _LITERAL_LAYOUT_TOKENS
-    ):
-        return ValidationResult(
-            False,
-            "added_literal_newline",
-            None,
-            baseline_count,
-            candidate_count,
-        )
-    tolerance = max(_RELAXED_MIN_LENGTH_TOLERANCE, baseline_count // 2)
-    minimum_count = max(1, baseline_count - tolerance)
-    maximum_count = baseline_count + tolerance
-    if not minimum_count <= candidate_count <= maximum_count:
+    baseline_count = len(_without_layout_tokens(baseline))
+    candidate_count = len(_without_layout_tokens(candidate))
+    length_change_percent_exceeded = (
+        abs(candidate_count - baseline_count) * 100
+        > baseline_count * _RELAXED_LENGTH_TOLERANCE_PERCENT
+    )
+    if length_change_percent_exceeded:
         return ValidationResult(
             False,
             "excessive_length_change",
@@ -223,7 +269,9 @@ def validate_layout_only_change(
                 i += len(matching_content)
                 j += len(matching_content)
             else:
-                output.append("\n")
+                # 新增字面量:不再折叠,原样输出,由 prepare_text_for_planning
+                # 统一折叠为真实换行(此时出现必为分段 LLM 新增)。
+                output.append(literal)
                 j += len(literal)
             continue
 

@@ -50,6 +50,21 @@ class LlmSegmenterPromptTests(unittest.TestCase):
         prompt = segmenter._prompt("第一句。第二句。")
         self.assertIn("不要输出字面量 \\n", prompt)
 
+    def test_prompt_declares_protocol_markers(self) -> None:
+        segmenter = LlmSegmenter(
+            segmenter_config(),
+            logging.getLogger("bubble-reply-test"),
+        )
+        prompt = segmenter._prompt("第一句。第二句。")
+        self.assertIn("内部颜文字保护标记", prompt)
+        self.assertIn("换行只能添加在整体之前或之后", prompt)
+        self.assertIn("<bubble-cr/>", prompt)
+        self.assertIn("<bubble-lf/>", prompt)
+        self.assertIn("<bubble-crlf/>", prompt)
+        self.assertIn("<bubble-lfcr/>", prompt)
+        self.assertIn("是内部转义占位符", prompt)
+        self.assertIn("不得删除、修改、替换或移动", prompt)
+
 
 class LlmSegmenterValidationTests(unittest.IsolatedAsyncioTestCase):
     async def test_strict_mode_rejects_text_changes(self) -> None:
@@ -72,13 +87,14 @@ class LlmSegmenterValidationTests(unittest.IsolatedAsyncioTestCase):
         )
         candidate = await segmenter.segment(
             "你好。原句。",
-            SegmentContext(_Gateway("你好！\n改写后的句子。"), "trace_demo"),
+            SegmentContext(_Gateway("你好！\n原句。"), "trace_demo"),
         )
         self.assertTrue(candidate.accepted)
-        self.assertEqual(candidate.layout_text, "你好！\n改写后的句子。")
+        self.assertEqual(candidate.layout_text, "你好！\n原句。")
         self.assertIsNone(candidate.rejection_reason)
 
-    async def test_relaxed_mode_rejects_added_literal_newline(self) -> None:
+    async def test_relaxed_mode_accepts_added_literal_newline(self) -> None:
+        # 字面量转义后,候选中的字面量必为分段 LLM 新增,relaxed 不再拒绝。
         gateway = _Gateway("你好。\\n补充一句。")
         segmenter = LlmSegmenter(
             segmenter_config(allow_text_changes=True),
@@ -88,9 +104,50 @@ class LlmSegmenterValidationTests(unittest.IsolatedAsyncioTestCase):
             "你好。补充一句。",
             SegmentContext(gateway, "trace_demo"),
         )
+        self.assertTrue(candidate.accepted)
+        self.assertEqual(candidate.layout_text, "你好。\\n补充一句。")
+
+    async def test_placeholder_passes_through_validation(self) -> None:
+        gateway = _Gateway("你好。<bubble-lf/>补充一句。")
+        segmenter = LlmSegmenter(
+            segmenter_config(),
+            logging.getLogger("bubble-reply-test"),
+        )
+        candidate = await segmenter.segment(
+            "你好。\\n补充一句。",
+            SegmentContext(gateway, "trace_demo"),
+        )
+        self.assertTrue(candidate.accepted)
+        self.assertEqual(candidate.layout_text, "你好。<bubble-lf/>补充一句。")
+
+    async def test_placeholder_removal_rejected(self) -> None:
+        gateway = _Gateway("你好。补充一句。")
+        segmenter = LlmSegmenter(
+            segmenter_config(),
+            logging.getLogger("bubble-reply-test"),
+        )
+        candidate = await segmenter.segment(
+            "你好。\\n补充一句。",
+            SegmentContext(gateway, "trace_demo"),
+        )
         self.assertFalse(candidate.accepted)
-        self.assertEqual(candidate.rejection_reason, "added_literal_newline")
-        self.assertEqual(candidate.layout_text, "你好。补充一句。")
+        self.assertEqual(candidate.rejection_reason, "placeholder_modified")
+        self.assertEqual(candidate.layout_text, "你好。<bubble-lf/>补充一句。")
+
+    async def test_emoticon_tag_split_rejected_by_segmenter(self) -> None:
+        gateway = _Gateway(
+            "<bubble-reply-emoticon>\n(^_^)</bubble-reply-emoticon>"
+        )
+        segmenter = LlmSegmenter(
+            segmenter_config(allow_text_changes=True),
+            logging.getLogger("bubble-reply-test"),
+        )
+        candidate = await segmenter.segment(
+            "<bubble-reply-emoticon>(^_^)</bubble-reply-emoticon>",
+            SegmentContext(gateway, "trace_demo"),
+        )
+        self.assertFalse(candidate.accepted)
+        self.assertEqual(candidate.rejection_reason, "emoticon_tag_split")
 
     async def test_empty_baseline_does_not_call_provider(self) -> None:
         gateway = _Gateway("凭空生成")

@@ -147,9 +147,11 @@ class AstrBotGateway:
             settings = None
 
         if override is not None:
-            streaming_enabled: bool | None = bool(override)
+            # 非 bool(如字符串 "false")视为未知,回退保守判断,避免误判为流式。
+            streaming_enabled = override if isinstance(override, bool) else None
         elif settings is not None and "streaming_response" in settings:
-            streaming_enabled = bool(settings["streaming_response"])
+            value = settings["streaming_response"]
+            streaming_enabled = value if isinstance(value, bool) else None
         else:
             streaming_enabled = None
 
