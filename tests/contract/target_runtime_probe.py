@@ -89,7 +89,12 @@ async def _run() -> None:
             schema=schema,
         )
         assert config["basic_settings"]["split_scope"] == "LLM_ONLY"
+        assert config["basic_settings"]["max_segments_to_disable"] == 0
         assert config["split_settings"]["strip_segment_whitespace"] is True
+        assert set(config["quote_media_settings"]) == {
+            "quote_mode",
+            "image_strategy",
+        }
         assert set(config["delay_settings"]) == {
             "delay_mode",
             "delay_seconds",
@@ -228,9 +233,28 @@ async def _run() -> None:
     assert not unsafe_event.sent
     assert any(isinstance(component, Comp.File) for component in unsafe_result.chain)
 
+    skipped_plugin = BubbleReplyPlugin(
+        _Context(),  # type: ignore[arg-type]
+        {
+            "basic_settings": {
+                "split_scope": "ALL",
+                "max_length_to_disable": 1,
+            }
+        },
+    )
+    skipped_result = MessageEventResult(
+        [Comp.Plain("<bubble-reply-x>正文</bubble-reply-x>")]
+    )
+    skipped_event = _Event(skipped_result)
+    await skipped_plugin.on_decorating_result(  # type: ignore[arg-type]
+        skipped_event
+    )
+    assert skipped_result.get_plain_text() == "正文"
+
     await plugin.terminate()
     await stream_plugin.terminate()
     await fallback_plugin.terminate()
+    await skipped_plugin.terminate()
 
     smart_plugin = BubbleReplyPlugin(
         _Context(),  # type: ignore[arg-type]

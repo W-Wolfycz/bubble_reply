@@ -1,7 +1,7 @@
 name: bubble_reply
 display_name: 灵动分段
 desc: 将长回复拆成自然聊天气泡，并安全处理智能引用、图片、表情与发送间隔。
-version: v1.0.2
+version: v1.0.3
 author: Wolfycz
 repo: "https://github.com/W-Wolfycz/bubble_reply"
 astrbot_version: ">=4.26,<5"

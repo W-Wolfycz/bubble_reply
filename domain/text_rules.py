@@ -23,6 +23,12 @@ NEWLINE_PLACEHOLDERS = tuple(
     placeholder for _literal, placeholder in LITERAL_NEWLINE_PLACEHOLDERS
 )
 
+_BUBBLE_REPLY_XML_TAG = re.compile(
+    r"</?bubble-reply(?=[\s/>-])(?:-[A-Za-z0-9_.:-]+)?"
+    r"(?:\s+[^<>]*)?\s*/?>",
+    re.IGNORECASE,
+)
+
 
 def normalize_real_newlines(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n")
@@ -72,6 +78,11 @@ def strip_emoticon_tags(text: str) -> str:
     return text.replace(EMOTICON_OPEN, "").replace(EMOTICON_CLOSE, "")
 
 
+def strip_bubble_reply_xml_tags(text: str) -> str:
+    """兜底移除 bubble-reply 私有命名空间的 XML 标签，仅保留标签内容。"""
+    return _BUBBLE_REPLY_XML_TAG.sub("", text)
+
+
 def prepare_text_for_planning(
     text: str,
     *,
@@ -88,7 +99,7 @@ def prepare_text_for_planning(
     result = replace_extra_split_points(result, extra_split_points)
     if emoticon_protection:
         result = strip_emoticon_tags(result)
-    return result
+    return strip_bubble_reply_xml_tags(result)
 
 
 def strip_tail_chars(text: str, chars: str) -> str:

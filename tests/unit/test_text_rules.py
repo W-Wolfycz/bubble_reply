@@ -6,6 +6,7 @@ from bubble_reply.domain.text_rules import (
     escape_literal_newlines,
     prepare_text_for_planning,
     restore_placeholder_newlines,
+    strip_bubble_reply_xml_tags,
 )
 
 
@@ -73,6 +74,30 @@ class TextRuleTests(unittest.TestCase):
             "a<bubble-reply-emoticon>(^_^)</bubble-reply-emoticon>b"
         )
         self.assertEqual(value, "a(^_^)b")
+
+    def test_bubble_reply_xml_fallback_removes_tags_only(self) -> None:
+        value = strip_bubble_reply_xml_tags(
+            "a<bubble-reply-x>yy</bubble-reply-x>b"
+        )
+        self.assertEqual(value, "ayyb")
+
+    def test_bubble_reply_xml_fallback_removes_misspelled_tag(self) -> None:
+        value = strip_bubble_reply_xml_tags(
+            "///</bubble-reply-emat>被夸得不知道怎么办。"
+        )
+        self.assertEqual(value, "///被夸得不知道怎么办。")
+
+    def test_bubble_reply_xml_fallback_handles_attributes_and_self_closing(self) -> None:
+        value = strip_bubble_reply_xml_tags(
+            'a<bubble-reply-x mode="demo">b<bubble-reply-y/>c'
+        )
+        self.assertEqual(value, "abc")
+
+    def test_bubble_reply_xml_fallback_respects_namespace_boundary(self) -> None:
+        value = strip_bubble_reply_xml_tags(
+            "<bubble-replying>保留</bubble-replying>"
+        )
+        self.assertEqual(value, "<bubble-replying>保留</bubble-replying>")
 
     def test_markdown_fence_is_preserved(self) -> None:
         code = "```python\nprint('x')\n```"

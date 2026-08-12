@@ -64,16 +64,10 @@ class LlmSegmenterConfig:
 @dataclass(frozen=True)
 class MediaPolicyConfig:
     image: ComponentPolicy
-    face: ComponentPolicy
-    at: ComponentPolicy
 
     def for_kind(self, kind: str) -> ComponentPolicy:
         if kind == "Image":
             return self.image
-        if kind == "Face":
-            return self.face
-        if kind == "At":
-            return self.at
         return ComponentPolicy.EMBED
 
 
@@ -109,6 +103,8 @@ class BlacklistConfig:
 class BubbleReplyConfig:
     scope: SplitScope
     max_length_to_disable: int
+    max_segments_to_disable: int
+    render_fallback_to_image: bool
     blacklist: BlacklistConfig
     text_rules: TextRuleConfig
     llm: LlmSegmenterConfig
@@ -238,20 +234,6 @@ def load_runtime_config(
         "quote_media_settings.image_strategy",
         warn,
     )
-    face_policy = _enum(
-        ComponentPolicy,
-        quote_media.get("face_strategy", ComponentPolicy.EMBED.value),
-        ComponentPolicy.EMBED,
-        "quote_media_settings.face_strategy",
-        warn,
-    )
-    at_policy = _enum(
-        ComponentPolicy,
-        quote_media.get("at_strategy", ComponentPolicy.EMBED.value),
-        ComponentPolicy.EMBED,
-        "quote_media_settings.at_strategy",
-        warn,
-    )
     quote_mode = _enum(
         QuoteMode,
         quote_media.get("quote_mode", QuoteMode.NONE.value),
@@ -297,6 +279,14 @@ def load_runtime_config(
             basic.get("max_length_to_disable", 0),
             0,
         ),
+        max_segments_to_disable=_int(
+            basic.get("max_segments_to_disable", 0),
+            0,
+        ),
+        render_fallback_to_image=_bool(
+            basic.get("render_fallback_to_image", False),
+            False,
+        ),
         blacklist=_blacklist(basic.get("blacklist", []), warn),
         text_rules=TextRuleConfig(
             extra_split_points=tuple(
@@ -339,8 +329,6 @@ def load_runtime_config(
         ),
         media=MediaPolicyConfig(
             image=image_policy,  # type: ignore[arg-type]
-            face=face_policy,  # type: ignore[arg-type]
-            at=at_policy,  # type: ignore[arg-type]
         ),
         quote=QuotePolicyConfig(
             mode=quote_mode,  # type: ignore[arg-type]

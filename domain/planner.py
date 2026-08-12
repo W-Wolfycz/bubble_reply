@@ -189,3 +189,28 @@ def plan_delivery(
         mode="segmented",
         reason="safe_prefix",
     )
+
+
+def apply_segment_limit(
+    candidate_plan: DeliveryPlan,
+    baseline_plan: DeliveryPlan,
+    maximum_segments: int,
+) -> DeliveryPlan:
+    """限制最终气泡数:智能候选超限时先回退普通分段,再整条发送。"""
+    if maximum_segments <= 0:
+        return candidate_plan
+    if len(candidate_plan.all_segments) <= maximum_segments:
+        return candidate_plan
+    if len(baseline_plan.all_segments) <= maximum_segments:
+        return DeliveryPlan(
+            active_segments=baseline_plan.active_segments,
+            respond_segments=baseline_plan.respond_segments,
+            mode=baseline_plan.mode,
+            reason="segment_limit_fallback",
+        )
+    return DeliveryPlan(
+        active_segments=[],
+        respond_segments=baseline_plan.all_segments,
+        mode="respond_only",
+        reason="segment_limit",
+    )

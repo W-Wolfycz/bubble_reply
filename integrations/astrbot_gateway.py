@@ -9,7 +9,7 @@ from astrbot.api.star import Context
 
 from ..domain.models import ComponentToken, PlannedSegment
 from ..domain.streaming import expects_visible_streaming
-from ..domain.text_rules import strip_emoticon_tags
+from ..domain.text_rules import strip_bubble_reply_xml_tags
 
 
 @dataclass(frozen=True)
@@ -182,13 +182,15 @@ class AstrBotGateway:
     def mark_partial_failure(self, reason: str) -> None:
         self._event.set_extra("_bubble_reply_partial_delivery", reason)
 
-    def strip_internal_emoticon_tags(self) -> None:
+    def strip_internal_bubble_reply_xml_tags(self) -> None:
         if self._result is None:
             return
         replacement: list[Any] = []
         for component in self._result.chain:
             if isinstance(component, Comp.Plain):
-                replacement.append(Comp.Plain(strip_emoticon_tags(component.text)))
+                replacement.append(
+                    Comp.Plain(strip_bubble_reply_xml_tags(component.text))
+                )
             else:
                 replacement.append(component)
         self._result.chain = replacement

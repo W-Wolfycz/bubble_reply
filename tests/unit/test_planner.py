@@ -4,15 +4,13 @@ import unittest
 
 from bubble_reply.config import ComponentPolicy, MediaPolicyConfig
 from bubble_reply.domain.models import ComponentToken
-from bubble_reply.domain.planner import plan_delivery
+from bubble_reply.domain.planner import apply_segment_limit, plan_delivery
 
 
 def media(
     image: ComponentPolicy = ComponentPolicy.EMBED,
-    face: ComponentPolicy = ComponentPolicy.EMBED,
-    at: ComponentPolicy = ComponentPolicy.EMBED,
 ) -> MediaPolicyConfig:
-    return MediaPolicyConfig(image=image, face=face, at=at)
+    return MediaPolicyConfig(image=image)
 
 
 def plain_text(segment) -> str:
@@ -138,6 +136,23 @@ class PlannerTests(unittest.TestCase):
         self.assertEqual(len(plan.active_segments), 2)
         self.assertFalse(plan.respond_segments)
 
+    def test_at_and_face_always_keep_original_position(self) -> None:
+        at = object()
+        face = object()
+        plan = plan_delivery(
+            [
+                ComponentToken("Plain", "a"),
+                ComponentToken("At", at),
+                ComponentToken("Face", face),
+                ComponentToken("Plain", "b"),
+            ],
+            media=media(image=ComponentPolicy.SEPARATE),
+        )
+        self.assertEqual(
+            plan.all_segments[0].component_kinds,
+            ("Plain", "At", "Face", "Plain"),
+        )
+
     def test_separate_image_preserves_order(self) -> None:
         image = object()
         plan = plan_delivery(
@@ -176,6 +191,37 @@ class PlannerTests(unittest.TestCase):
             for component in segment.components
         )
         self.assertEqual(reply_count, 1)
+
+    def test_segment_limit_falls_back_to_baseline_plan(self) -> None:
+        baseline = plan_delivery([ComponentToken("Plain", "a\nb")], media=media())
+        candidate = plan_delivery(
+            [ComponentToken("Plain", "a\nb\nc")],
+            media=media(),
+        )
+        selected = apply_segment_limit(candidate, baseline, 2)
+        self.assertEqual(selected.reason, "segment_limit_fallback")
+        self.assertEqual(len(selected.all_segments), 2)
+        self.assertEqual(selected.mode, "segmented")
+
+    def test_segment_limit_falls_back_to_one_respond_result_when_both_exceed(self) -> None:
+        baseline = plan_delivery(
+            [ComponentToken("Plain", "a\nb\nc")],
+            media=media(),
+        )
+        candidate = plan_delivery(
+            [ComponentToken("Plain", "a\nb\nc\nd")],
+            media=media(),
+        )
+        selected = apply_segment_limit(candidate, baseline, 2)
+        self.assertEqual(selected.reason, "segment_limit")
+        self.assertEqual(selected.mode, "respond_only")
+        self.assertFalse(selected.active_segments)
+        self.assertEqual(len(selected.respond_segments), 3)
+
+    def test_unlimited_segment_limit_keeps_candidate_plan(self) -> None:
+        baseline = plan_delivery([ComponentToken("Plain", "a")], media=media())
+        candidate = plan_delivery([ComponentToken("Plain", "a\nb")], media=media())
+        self.assertIs(apply_segment_limit(candidate, baseline, 0), candidate)
 
 
 if __name__ == "__main__":

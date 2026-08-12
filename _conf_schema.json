@@ -17,6 +17,18 @@
         "default": 0,
         "hint": "回复超过这个字符数时不再分段。0 表示不限制。"
       },
+      "max_segments_to_disable": {
+        "description": "气泡段数上限",
+        "type": "int",
+        "default": 0,
+        "hint": "最终计划的气泡数超过这个上限时，优先回退到主 LLM 原有分段；原有分段也超限时整条发送。0 表示不限制。"
+      },
+      "render_fallback_to_image": {
+        "description": "回退渲染成图",
+        "type": "bool",
+        "default": false,
+        "hint": "启用后，字符超限或段数超限的最终回退会把纯文本渲染成一张图片发送（使用 AstrBot 内置渲染）。含图片、表情、At 等组件的回复保持原样。"
+      },
       "blacklist": {
         "description": "会话黑名单",
         "type": "list",
@@ -110,7 +122,7 @@
   "quote_media_settings": {
     "description": "引用与组件",
     "type": "object",
-    "hint": "控制是否引用原消息，以及图片、表情和 At 跟随哪一段发送。",
+    "hint": "控制是否引用原消息，以及图片跟随哪一段发送。平台表情和 At 始终保持原位置。",
     "items": {
       "quote_mode": {
         "description": "引用方式",
@@ -125,20 +137,6 @@
         "options": ["单独发送", "跟随上一段", "跟随下一段", "保持原位置"],
         "default": "保持原位置",
         "hint": "决定图片单独发送，还是与前后文字放在同一条消息中。"
-      },
-      "face_strategy": {
-        "description": "表情发送方式",
-        "type": "string",
-        "options": ["单独发送", "跟随上一段", "跟随下一段", "保持原位置"],
-        "default": "保持原位置",
-        "hint": "决定平台表情单独发送，还是跟随前后文字。"
-      },
-      "at_strategy": {
-        "description": "At 发送方式",
-        "type": "string",
-        "options": ["单独发送", "跟随上一段", "跟随下一段", "保持原位置"],
-        "default": "保持原位置",
-        "hint": "决定 At 单独发送，还是跟随前后文字。"
       }
     }
   },

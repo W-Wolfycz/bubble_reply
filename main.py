@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import secrets
+from typing import Any
 
+import astrbot.api.message_components as Comp
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, ResultContentType, filter
 from astrbot.api.provider import ProviderRequest
 from astrbot.api.star import Context, Star
 
 from .config import BubbleReplyConfig, QuoteMode, SplitScope, load_runtime_config
-from .domain.models import ComponentToken
-from .domain.planner import plan_delivery
+from .domain.models import ComponentToken, PlannedSegment
+from .domain.planner import apply_segment_limit, plan_delivery
 from .domain.text_rules import prepare_text_for_planning
 from .integrations.astrbot_gateway import AstrBotGateway, ResultSnapshot
 from .services.delivery_orchestrator import (
@@ -23,7 +25,6 @@ from .services.smart_reply_tracker import RequestMark, SmartReplyTracker
 DECORATE_PRIORITY = -100_000
 INCOMING_PRIORITY = 100_000
 REQUEST_MARK_KEY = "_bubble_reply_request_mark"
-PROTOCOL_INJECTED_KEY = "_bubble_reply_emoticon_protocol_injected"
 EMOTICON_PROTOCOL_MARKER = "[bubble-reply-emoticon-protocol-v1]"
 EMOTICON_PROTOCOL = f"""{EMOTICON_PROTOCOL_MARKER}
 当回复中出现颜文字时，请逐字使用
@@ -166,7 +167,6 @@ class BubbleReplyPlugin(Star):
             current = request.system_prompt or ""
             if EMOTICON_PROTOCOL_MARKER not in current:
                 request.system_prompt = f"{current}\n\n{EMOTICON_PROTOCOL}".strip()
-            gateway.set_extra(PROTOCOL_INJECTED_KEY, True)
 
     def _should_add_quote(
         self,
@@ -189,6 +189,40 @@ class BubbleReplyPlugin(Star):
         self._debug("[BubbleReply] 原文本: %s", original)
         self._debug("[BubbleReply] 分段后: %s", final_text)
 
+    async def _render_fallback_to_image(
+        self,
+        gateway: AstrBotGateway,
+        plain_parts: list[str],
+        reply_component: Any | None,
+        log_prefix: str,
+    ) -> bool:
+        """最终回退时把纯文本渲染成图,结果链替换为 [Reply?, Image]。
+
+        渲染失败或产出为空时返回 False,调用方保持原样发送。
+        """
+        text = "\n".join(part for part in plain_parts if part)
+        if not text.strip():
+            return False
+        try:
+            path = await self.text_to_image(text, return_url=False)
+        except Exception as exc:
+            logger.warning(
+                "%s t2i_fallback failed error_type=%s",
+                log_prefix,
+                type(exc).__name__,
+            )
+            return False
+        if not path:
+            return False
+        components: list[Any] = []
+        if reply_component is not None:
+            components.append(reply_component)
+        components.append(Comp.Image(file=str(path)))
+        segment = PlannedSegment.from_components(components)
+        gateway.replace_result_segments([segment])
+        logger.info("%s t2i_fallback rendered text_len=%s", log_prefix, len(text))
+        return True
+
     @filter.on_decorating_result(priority=DECORATE_PRIORITY)
     async def on_decorating_result(self, event: AstrMessageEvent) -> None:
         gateway = AstrBotGateway(self.context, event)
@@ -199,28 +233,52 @@ class BubbleReplyPlugin(Star):
         mark = gateway.get_extra(REQUEST_MARK_KEY)
         skip_reason = self._skip_reason(gateway, snapshot)
         if skip_reason is not None:
+            log_prefix = self._log_prefix(gateway)
             self._debug(
                 "%s skip reason=%s",
-                self._log_prefix(gateway),
+                log_prefix,
                 skip_reason,
             )
-            # If this request received the internal protocol, prevent tag leakage
-            # when a post-generation length limit causes a split bypass.
-            if (
-                skip_reason == "length_limit"
-                and gateway.get_extra(PROTOCOL_INJECTED_KEY, False)
-            ):
-                gateway.strip_internal_emoticon_tags()
+            # 即使本轮跳过分段，也统一清理插件私有 XML 标签。
+            gateway.strip_internal_bubble_reply_xml_tags()
+            if skip_reason == "length_limit" and self._runtime.render_fallback_to_image:
+                plain_parts = [
+                    str(component.text)
+                    for component in snapshot.chain
+                    if isinstance(component, Comp.Plain)
+                ]
+                media_present = any(
+                    not isinstance(component, (Comp.Plain, Comp.Reply))
+                    for component in snapshot.chain
+                )
+                reply_component = next(
+                    (
+                        component
+                        for component in snapshot.chain
+                        if isinstance(component, Comp.Reply)
+                    ),
+                    None,
+                )
+                if not media_present and await self._render_fallback_to_image(
+                    gateway,
+                    plain_parts,
+                    reply_component,
+                    log_prefix,
+                ):
+                    self._tracker.finish(gateway.umo, mark)
+                    return
             self._tracker.finish(gateway.umo, mark)
             return
 
         trace_id = secrets.token_hex(4)
         log_prefix = self._log_prefix(gateway)
         tokens: list[ComponentToken] = []
+        baseline_tokens: list[ComponentToken] = []
         try:
             for component in snapshot.chain:
                 token = gateway.to_token(component)
                 if token.kind != "Plain":
+                    baseline_tokens.append(token)
                     tokens.append(token)
                     continue
 
@@ -232,6 +290,14 @@ class BubbleReplyPlugin(Star):
                         trace_id=trace_id,
                         log_prefix=log_prefix,
                     ),
+                )
+                baseline_prepared = prepare_text_for_planning(
+                    candidate.cleaned,
+                    extra_split_points=self._runtime.text_rules.extra_split_points,
+                    interpret_literals=(
+                        self._runtime.text_rules.interpret_literal_newlines
+                    ),
+                    emoticon_protection=self._runtime.text_rules.emoticon_protection,
                 )
                 chosen = candidate.layout_text or candidate.cleaned
                 prepared = prepare_text_for_planning(
@@ -245,9 +311,21 @@ class BubbleReplyPlugin(Star):
                     emoticon_protection=self._runtime.text_rules.emoticon_protection,
                 )
                 self._content_log(original, prepared)
+                baseline_tokens.append(ComponentToken("Plain", baseline_prepared))
                 tokens.append(ComponentToken("Plain", prepared))
 
             should_reply = self._should_add_quote(gateway, mark)
+            reply_token = gateway.make_reply_token() if should_reply else None
+            baseline_plan = plan_delivery(
+                baseline_tokens,
+                media=self._runtime.media,
+                strip_segment_tail_chars=self._runtime.text_rules.strip_segment_tail_chars,
+                strip_segment_whitespace=(
+                    self._runtime.text_rules.strip_segment_whitespace
+                ),
+                should_add_reply=should_reply,
+                reply_token=reply_token,
+            )
             plan = plan_delivery(
                 tokens,
                 media=self._runtime.media,
@@ -256,17 +334,56 @@ class BubbleReplyPlugin(Star):
                     self._runtime.text_rules.strip_segment_whitespace
                 ),
                 should_add_reply=should_reply,
-                reply_token=gateway.make_reply_token() if should_reply else None,
+                reply_token=reply_token,
             )
+            candidate_segments = len(plan.all_segments)
+            baseline_segments = len(baseline_plan.all_segments)
+            limit = self._runtime.max_segments_to_disable
+            plan = apply_segment_limit(plan, baseline_plan, limit)
             logger.info(
-                "%s plan mode=%s segments=%s text_len=%s reason=%s trace=%s",
+                "%s plan mode=%s segments=%s candidate_segments=%s baseline_segments=%s limit=%s text_len=%s reason=%s trace=%s",
                 log_prefix,
                 plan.mode,
                 len(plan.all_segments),
+                candidate_segments,
+                baseline_segments,
+                limit,
                 sum(segment.plain_text_length for segment in plan.all_segments),
                 plan.reason,
                 trace_id,
             )
+            if (
+                plan.mode == "respond_only"
+                and plan.reason == "segment_limit"
+                and self._runtime.render_fallback_to_image
+            ):
+                plain_parts = [
+                    str(token.payload)
+                    for segment in plan.respond_segments
+                    for token in segment.components
+                    if token.kind == "Plain"
+                ]
+                media_present = any(
+                    token.kind not in {"Plain", "Reply"}
+                    for segment in plan.respond_segments
+                    for token in segment.components
+                )
+                reply_component = next(
+                    (
+                        token.payload
+                        for segment in plan.respond_segments
+                        for token in segment.components
+                        if token.kind == "Reply"
+                    ),
+                    None,
+                )
+                if not media_present and await self._render_fallback_to_image(
+                    gateway,
+                    plain_parts,
+                    reply_component,
+                    log_prefix,
+                ):
+                    return
             await self._orchestrator.execute(
                 plan,
                 gateway,

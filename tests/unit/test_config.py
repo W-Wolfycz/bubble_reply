@@ -49,6 +49,20 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(delay.maximum_seconds, 2.5)
         self.assertEqual(delay.jitter_seconds, 0)
 
+    def test_segment_limit_defaults_to_unlimited(self) -> None:
+        self.assertEqual(load_runtime_config({}).max_segments_to_disable, 0)
+        config = load_runtime_config(
+            {"basic_settings": {"max_segments_to_disable": 6}}
+        )
+        self.assertEqual(config.max_segments_to_disable, 6)
+
+    def test_render_fallback_defaults_off(self) -> None:
+        self.assertFalse(load_runtime_config({}).render_fallback_to_image)
+        config = load_runtime_config(
+            {"basic_settings": {"render_fallback_to_image": True}}
+        )
+        self.assertTrue(config.render_fallback_to_image)
+
     def test_delay_bounds_are_ordered_and_warn(self) -> None:
         warnings: list[str] = []
         delay = load_runtime_config(
@@ -79,6 +93,20 @@ class ConfigTests(unittest.TestCase):
             {"split_settings": {"strip_segment_whitespace": False}}
         )
         self.assertFalse(config.text_rules.strip_segment_whitespace)
+
+    def test_face_and_at_strategy_legacy_values_are_ignored(self) -> None:
+        config = load_runtime_config(
+            {
+                "quote_media_settings": {
+                    "image_strategy": "跟随下一段",
+                    "face_strategy": "单独发送",
+                    "at_strategy": "跟随上一段",
+                }
+            }
+        )
+        self.assertEqual(config.media.image, ComponentPolicy.FOLLOW_NEXT)
+        self.assertEqual(config.media.for_kind("Face"), ComponentPolicy.EMBED)
+        self.assertEqual(config.media.for_kind("At"), ComponentPolicy.EMBED)
 
     def test_invalid_regex_is_removed(self) -> None:
         warnings: list[str] = []
