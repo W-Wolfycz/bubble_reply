@@ -1,4 +1,16 @@
 {
+  "log_with_bot_id": {
+    "description": "日志区分机器人实例",
+    "type": "bool",
+    "default": false,
+    "hint": "开启后日志会标注是哪个 Bot 实例产生的，多 Bot 环境方便定位。日志详细程度请在 WebUI 插件详情页调整，即时生效。"
+  },
+  "log_original_text": {
+    "description": "记录完整正文",
+    "type": "bool",
+    "default": false,
+    "hint": "开启后日志可能包含完整对话内容。排查结束后建议关闭。"
+  },
   "basic_settings": {
     "description": "基础设置",
     "type": "object",
@@ -181,31 +193,6 @@
         "type": "float",
         "default": 0,
         "hint": "同时作用于固定间隔和按字数。例如基础间隔 0.8、随机浮动 0.2，实际会在 0.6–1.0 秒之间变化。0 表示关闭。"
-      }
-    }
-  },
-  "log_config": {
-    "description": "日志配置",
-    "type": "object",
-    "hint": "控制日志前缀和调试信息。",
-    "items": {
-      "log_with_bot_id": {
-        "description": "日志区分机器人实例",
-        "type": "bool",
-        "default": false,
-        "hint": "开启后日志前缀会附加当前机器人 ID，便于多 Bot 环境定位。"
-      },
-      "log_original_text": {
-        "description": "记录完整正文",
-        "type": "bool",
-        "default": false,
-        "hint": "开启后日志可能包含完整对话内容。排查结束后建议关闭。"
-      },
-      "debug_to_info": {
-        "description": "调试日志提级",
-        "type": "bool",
-        "default": false,
-        "hint": "开启后 debug 日志以 info 级别输出，插件热重载即可生效。"
       }
     }
   }

@@ -7,6 +7,7 @@ import astrbot.api.message_components as Comp
 from astrbot.api.event import AstrMessageEvent, ResultContentType
 from astrbot.api.star import Context
 
+from ..domain.message_kind import is_noise_message
 from ..domain.models import ComponentToken, PlannedSegment
 from ..domain.streaming import expects_visible_streaming
 from ..domain.text_rules import strip_bubble_reply_xml_tags
@@ -60,6 +61,25 @@ class AstrBotGateway:
         return ComponentToken(
             "Reply",
             Comp.Reply(id=message_id, sender_id=sender_id),
+        )
+
+    def is_noise_event(self) -> bool:
+        """是否非对话消息（系统事件 / notice / request / 戳一戳）。"""
+        message_type = self._event.get_message_type()
+        message_type_value = str(getattr(message_type, "value", "") or "")
+        message_obj = getattr(self._event, "message_obj", None)
+        raw = getattr(message_obj, "raw_message", None)
+        post_type = str(raw.get("post_type") or "") if isinstance(raw, dict) else ""
+        chain: list[Any] = []
+        try:
+            chain = self._event.get_messages() or []
+        except Exception:
+            chain = []
+        has_poke = any(isinstance(component, Comp.Poke) for component in chain)
+        return is_noise_message(
+            message_type_value=message_type_value,
+            post_type=post_type,
+            has_poke=has_poke,
         )
 
     @staticmethod

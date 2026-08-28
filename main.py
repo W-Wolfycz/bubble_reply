@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import secrets
 from typing import Any
 
@@ -9,7 +10,13 @@ from astrbot.api.event import AstrMessageEvent, ResultContentType, filter
 from astrbot.api.provider import ProviderRequest
 from astrbot.api.star import Context, Star
 
-from .config import BubbleReplyConfig, QuoteMode, SplitScope, load_runtime_config
+from .config import (
+    BubbleReplyConfig,
+    QuoteMode,
+    SplitScope,
+    load_runtime_config,
+    migrate_log_config_inplace,
+)
 from .domain.models import ComponentToken, PlannedSegment
 from .domain.planner import apply_segment_limit, plan_delivery
 from .domain.text_rules import prepare_text_for_planning
@@ -83,8 +90,34 @@ class BubbleReplyPlugin(Star):
         )
 
     async def initialize(self) -> None:
+        # 加载阶段执行一次性配置迁移（旧 log_config 组并入顶层）。
+        # 迁移失败不阻断加载：读时兜底已保证行为正确，仅下次启动重试。
+        await self._migrate_log_config()
         self._rebuild_services()
         logger.info("[BubbleReply] initialized")
+
+    async def _migrate_log_config(self) -> None:
+        """把旧 ``log_config`` 组迁移到顶层并写回删除旧组。"""
+        if not migrate_log_config_inplace(self._raw_config):
+            return
+        save = getattr(self._raw_config, "save_config_async", None) or getattr(
+            self._raw_config, "save_config", None
+        )
+        if not callable(save):
+            logger.warning(
+                "[BubbleReply] 配置迁移已在内存完成，但 config 对象不支持写回"
+            )
+            return
+        try:
+            result = save()
+            if inspect.isawaitable(result):
+                await result
+            logger.info("[BubbleReply] 已迁移日志配置：log_config 组并入顶层并移除旧组")
+        except Exception as exc:
+            logger.warning(
+                "[BubbleReply] 配置迁移写回失败: %s",
+                type(exc).__name__,
+            )
 
     async def terminate(self) -> None:
         global _SMART_QUOTE_FRIEND_BLACKLIST
@@ -123,12 +156,13 @@ class BubbleReplyPlugin(Star):
 
     def _log_prefix(self, gateway: AstrBotGateway) -> str:
         if self._runtime.logging.log_with_bot_id and gateway.self_id:
-            return f"[BubbleReply:{gateway.self_id}]"
+            # 保留模块名并追加 bot 标识，禁止用 bot 标识替换整个前缀。
+            return f"[BubbleReply:bot-{gateway.self_id}]"
         return "[BubbleReply]"
 
     def _debug(self, message: str, *args) -> None:
-        method = logger.info if self._runtime.logging.debug_to_info else logger.debug
-        method(message, *args)
+        # 诊断细节统一走 debug 级别；日志等级由 WebUI 插件详情页按插件独立调整。
+        logger.debug(message, *args)
 
     @filter.event_message_type(filter.EventMessageType.ALL, priority=INCOMING_PRIORITY)
     @filter.custom_filter(
@@ -138,6 +172,10 @@ class BubbleReplyPlugin(Star):
     )
     async def observe_incoming_message(self, event: AstrMessageEvent) -> None:
         gateway = AstrBotGateway(self.context, event)
+        if gateway.is_noise_event():
+            # 系统消息、notice/request、戳一戳不推进打断序号，只累积噪声计数。
+            self._tracker.note_noise(gateway.umo)
+            return
         mark = self._tracker.begin(gateway.umo, gateway.message_id)
         gateway.set_extra(REQUEST_MARK_KEY, mark)
 
@@ -239,6 +277,8 @@ class BubbleReplyPlugin(Star):
                 log_prefix,
                 skip_reason,
             )
+            # 跳过分段时回复仍会发出：记录一次 bot 回复，让同会话后续请求能识别打断。
+            self._tracker.note_outgoing(gateway.umo)
             # 即使本轮跳过分段，也统一清理插件私有 XML 标签。
             gateway.strip_internal_bubble_reply_xml_tags()
             if skip_reason == "length_limit" and self._runtime.render_fallback_to_image:
@@ -315,6 +355,8 @@ class BubbleReplyPlugin(Star):
                 tokens.append(ComponentToken("Plain", prepared))
 
             should_reply = self._should_add_quote(gateway, mark)
+            # 本轮回复即将发出：记录一次 bot 回复，使同会话后续请求能识别打断。
+            self._tracker.note_outgoing(gateway.umo)
             reply_token = gateway.make_reply_token() if should_reply else None
             baseline_plan = plan_delivery(
                 baseline_tokens,
