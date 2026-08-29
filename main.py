@@ -219,10 +219,10 @@ class BubbleReplyPlugin(Star):
             return False
         if not path:
             return False
-        components: list[Any] = []
+        components: list[ComponentToken] = []
         if reply_component is not None:
-            components.append(reply_component)
-        components.append(Comp.Image(file=str(path)))
+            components.append(gateway.to_token(reply_component))
+        components.append(gateway.to_token(Comp.Image(file=str(path))))
         segment = PlannedSegment.from_components(components)
         gateway.replace_result_segments([segment])
         logger.info("%s t2i_fallback rendered text_len=%s", log_prefix, len(text))

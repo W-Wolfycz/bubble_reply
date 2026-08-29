@@ -48,6 +48,9 @@ class _Event:
     def get_platform_name(self) -> str:
         return "platform_demo"
 
+    def get_platform_id(self) -> str:
+        return "platform_demo"
+
     def get_group_id(self) -> str:
         return ""
 
@@ -251,10 +254,34 @@ async def _run() -> None:
     )
     assert skipped_result.get_plain_text() == "正文"
 
+    async def fake_text_to_image(_text, return_url=True):
+        _ = return_url
+        return "fake_image.jpg"
+
+    render_plugin = BubbleReplyPlugin(
+        _Context(),  # type: ignore[arg-type]
+        {
+            "basic_settings": {
+                "split_scope": "ALL",
+                "max_length_to_disable": 1,
+                "render_fallback_to_image": True,
+            }
+        },
+    )
+    render_plugin.text_to_image = fake_text_to_image  # type: ignore[method-assign]
+    render_result = MessageEventResult([Comp.Plain("正文")])
+    render_event = _Event(render_result)
+    await render_plugin.on_decorating_result(  # type: ignore[arg-type]
+        render_event
+    )
+    assert len(render_result.chain) == 1
+    assert isinstance(render_result.chain[0], Comp.Image)
+
     await plugin.terminate()
     await stream_plugin.terminate()
     await fallback_plugin.terminate()
     await skipped_plugin.terminate()
+    await render_plugin.terminate()
 
     smart_plugin = BubbleReplyPlugin(
         _Context(),  # type: ignore[arg-type]

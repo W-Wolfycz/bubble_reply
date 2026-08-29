@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from bubble_reply.config import ComponentPolicy, MediaPolicyConfig
-from bubble_reply.domain.models import ComponentToken
+from bubble_reply.domain.models import ComponentToken, PlannedSegment
 from bubble_reply.domain.planner import apply_segment_limit, plan_delivery
 
 
@@ -222,6 +222,14 @@ class PlannerTests(unittest.TestCase):
         baseline = plan_delivery([ComponentToken("Plain", "a")], media=media())
         candidate = plan_delivery([ComponentToken("Plain", "a\nb")], media=media())
         self.assertIs(apply_segment_limit(candidate, baseline, 0), candidate)
+
+    def test_reply_image_only_segment_has_zero_plain_length(self) -> None:
+        # 回退渲染成图会构造 [Reply?, Image] 段：非 Plain 组件不计入正文字数。
+        segment = PlannedSegment.from_components(
+            [ComponentToken("Reply", object()), ComponentToken("Image", object())]
+        )
+        self.assertEqual(segment.component_kinds, ("Reply", "Image"))
+        self.assertEqual(segment.plain_text_length, 0)
 
 
 if __name__ == "__main__":
