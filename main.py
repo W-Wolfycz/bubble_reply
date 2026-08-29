@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import inspect
 import secrets
 from typing import Any
 
@@ -10,13 +9,7 @@ from astrbot.api.event import AstrMessageEvent, ResultContentType, filter
 from astrbot.api.provider import ProviderRequest
 from astrbot.api.star import Context, Star
 
-from .config import (
-    BubbleReplyConfig,
-    QuoteMode,
-    SplitScope,
-    load_runtime_config,
-    migrate_log_config_inplace,
-)
+from .config import BubbleReplyConfig, QuoteMode, SplitScope, load_runtime_config
 from .domain.models import ComponentToken, PlannedSegment
 from .domain.planner import apply_segment_limit, plan_delivery
 from .domain.text_rules import prepare_text_for_planning
@@ -90,34 +83,8 @@ class BubbleReplyPlugin(Star):
         )
 
     async def initialize(self) -> None:
-        # 加载阶段执行一次性配置迁移（旧 log_config 组并入顶层）。
-        # 迁移失败不阻断加载：读时兜底已保证行为正确，仅下次启动重试。
-        await self._migrate_log_config()
         self._rebuild_services()
         logger.info("[BubbleReply] initialized")
-
-    async def _migrate_log_config(self) -> None:
-        """把旧 ``log_config`` 组迁移到顶层并写回删除旧组。"""
-        if not migrate_log_config_inplace(self._raw_config):
-            return
-        save = getattr(self._raw_config, "save_config_async", None) or getattr(
-            self._raw_config, "save_config", None
-        )
-        if not callable(save):
-            logger.warning(
-                "[BubbleReply] 配置迁移已在内存完成，但 config 对象不支持写回"
-            )
-            return
-        try:
-            result = save()
-            if inspect.isawaitable(result):
-                await result
-            logger.info("[BubbleReply] 已迁移日志配置：log_config 组并入顶层并移除旧组")
-        except Exception as exc:
-            logger.warning(
-                "[BubbleReply] 配置迁移写回失败: %s",
-                type(exc).__name__,
-            )
 
     async def terminate(self) -> None:
         global _SMART_QUOTE_FRIEND_BLACKLIST
@@ -155,9 +122,9 @@ class BubbleReplyPlugin(Star):
         return None
 
     def _log_prefix(self, gateway: AstrBotGateway) -> str:
-        if self._runtime.logging.log_with_bot_id and gateway.self_id:
-            # 保留模块名并追加 bot 标识，禁止用 bot 标识替换整个前缀。
-            return f"[BubbleReply:bot-{gateway.self_id}]"
+        if self._runtime.logging.log_with_bot_id and gateway.platform_id:
+            # 保留模块名并追加平台标识（对齐 softblock 的 [模块][platform:{id}] 形式）。
+            return f"[BubbleReply][platform:{gateway.platform_id}]"
         return "[BubbleReply]"
 
     def _debug(self, message: str, *args) -> None:

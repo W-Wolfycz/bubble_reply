@@ -217,7 +217,6 @@ def load_runtime_config(
     llm = _section(raw, "llm_split_settings")
     quote_media = _section(raw, "quote_media_settings")
     delay = _section(raw, "delay_settings")
-    legacy_log = _section(raw, "log_config")
 
     scope = _enum(
         SplitScope,
@@ -347,42 +346,13 @@ def load_runtime_config(
             ),
         ),
         logging=LoggingConfig(
-            # 日志配置已扁平化到顶层。读时兼容旧 log_config 组：旧组仍存在
-            # （升级后迁移尚未执行/写回失败）时其值为旧用户意图，优先于顶层键
-            # （顶层键可能已被 AstrBot 按新 schema 注入默认值）。
             log_original_text=_bool(
-                legacy_log.get(
-                    "log_original_text",
-                    raw.get("log_original_text", False),
-                ),
+                raw.get("log_original_text", False),
                 False,
             ),
             log_with_bot_id=_bool(
-                legacy_log.get(
-                    "log_with_bot_id",
-                    raw.get("log_with_bot_id", False),
-                ),
+                raw.get("log_with_bot_id", False),
                 False,
             ),
         ),
     )
-
-
-def migrate_log_config_inplace(raw: dict[str, Any]) -> bool:
-    """把旧 ``log_config`` 组迁移到顶层并删除旧组（原地修改）。
-
-    顶层键 ``log_with_bot_id`` / ``log_original_text`` 会被旧组内的同名键覆盖；
-    旧组中缺失的键不迁移（保留顶层现有值）。返回是否实际发生了迁移。
-
-    该函数只做内存内的结构调整，写回由调用方（插件 ``initialize``）负责；
-    写回失败不阻断加载，下次加载时旧组仍存在会再次读取兜底。
-    """
-    if not isinstance(raw, dict) or "log_config" not in raw:
-        return False
-    legacy = raw.get("log_config")
-    if isinstance(legacy, Mapping):
-        for key in ("log_with_bot_id", "log_original_text"):
-            if key in legacy:
-                raw[key] = legacy[key]
-    del raw["log_config"]
-    return True

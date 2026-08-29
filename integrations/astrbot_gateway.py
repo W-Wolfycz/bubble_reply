@@ -236,6 +236,10 @@ class AstrBotGateway:
         return str(self._event.get_platform_name() or "")
 
     @property
+    def platform_id(self) -> str:
+        return str(self._event.get_platform_id() or "")
+
+    @property
     def self_id(self) -> str:
         return str(self._event.get_self_id() or "")
 

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.1 — 2026-08-26
+
+### 修复
+
+- **配置迁移失效**：1.1.0 的 `log_config` 组 → 顶层 `log_with_bot_id` 迁移逻辑实际未能生效（AstrBot 在插件加载前已按新 schema 丢弃旧组），已删除迁移代码与旧组继承兜底；升级后日志开关需在 WebUI 手动重设。
+- **日志前缀格式对齐**：`log_with_bot_id` 启用后前缀由 `[BubbleReply:bot-self_id]` 改为 `[BubbleReply][platform:{platform_id}]`，对齐 softblock 参考实现。
+
+测试：行为级 116 项（单元 109 + 投递编排契约 7）。
+
 ## 1.1.0 — 2026-08-26
 
 ### 变更

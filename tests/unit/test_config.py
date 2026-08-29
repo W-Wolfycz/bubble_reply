@@ -7,7 +7,6 @@ from bubble_reply.config import (
     DelayMode,
     SplitScope,
     load_runtime_config,
-    migrate_log_config_inplace,
 )
 
 
@@ -157,63 +156,6 @@ class ConfigTests(unittest.TestCase):
         ).logging
         self.assertTrue(logging.log_with_bot_id)
         self.assertTrue(logging.log_original_text)
-
-    def test_logging_legacy_group_overrides_top_level(self) -> None:
-        # 升级后旧组仍存在时，其值为旧用户意图，优先于顶层键。
-        logging = load_runtime_config(
-            {
-                "log_with_bot_id": False,
-                "log_original_text": False,
-                "log_config": {
-                    "log_with_bot_id": True,
-                    "log_original_text": True,
-                },
-            }
-        ).logging
-        self.assertTrue(logging.log_with_bot_id)
-        self.assertTrue(logging.log_original_text)
-
-    def test_logging_legacy_partial_key_falls_back_to_top_level(self) -> None:
-        logging = load_runtime_config(
-            {
-                "log_with_bot_id": True,
-                "log_config": {"log_original_text": True},
-            }
-        ).logging
-        # 旧组缺失的键不覆盖顶层值。
-        self.assertTrue(logging.log_with_bot_id)
-        self.assertTrue(logging.log_original_text)
-
-    def test_migrate_log_config_moves_values_and_removes_group(self) -> None:
-        raw = {
-            "log_with_bot_id": False,
-            "log_original_text": False,
-            "log_config": {
-                "log_with_bot_id": True,
-                "log_original_text": True,
-                "debug_to_info": True,
-            },
-        }
-        self.assertTrue(migrate_log_config_inplace(raw))
-        self.assertEqual(raw["log_with_bot_id"], True)
-        self.assertEqual(raw["log_original_text"], True)
-        self.assertNotIn("log_config", raw)
-        self.assertNotIn("debug_to_info", raw)
-
-    def test_migrate_log_config_is_noop_without_legacy_group(self) -> None:
-        raw = {"log_with_bot_id": False, "log_original_text": False}
-        self.assertFalse(migrate_log_config_inplace(raw))
-        self.assertEqual(raw, {"log_with_bot_id": False, "log_original_text": False})
-
-    def test_migrate_log_config_preserves_top_level_for_missing_legacy_key(self) -> None:
-        raw = {
-            "log_with_bot_id": True,
-            "log_config": {"log_original_text": True},
-        }
-        self.assertTrue(migrate_log_config_inplace(raw))
-        self.assertEqual(raw["log_with_bot_id"], True)
-        self.assertEqual(raw["log_original_text"], True)
-        self.assertNotIn("log_config", raw)
 
 
 if __name__ == "__main__":
